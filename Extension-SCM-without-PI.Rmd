@@ -30,10 +30,10 @@ load("data/abbr_code.RData")
 # Data Subsetting
 #-----------------------------------------------------------------------------------------#
 
-PRIMARY_M <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
-PRIMARY_P <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
-LOWERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
-LOWERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
+PRIMARY_M_PI <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
+PRIMARY_P_PI <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
+LOWERS_M_PI <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
+LOWERS_P_PI <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
 
 #-----------------------------------------------------------------------------------------#
 # Preparing Data for Synth (Excluding Piauí)
@@ -44,7 +44,7 @@ prepare_p_ls_PI <- function(data) {
   
   predictors <- c("homicides", "TWh", "ln_pop", "unemployment", "edu_invest_pc")
   
-  DATA <- dataprep(foo = data,
+  DATA_PI <- dataprep(foo = data,
                    predictors = predictors,
                    dependent = "score",
                    unit.variable = "code_state",
@@ -57,84 +57,140 @@ prepare_p_ls_PI <- function(data) {
                    time.optimize.ssr = seq(1995, 2007, 2),
                    time.plot = seq(1995, 2019, 2))
   
-  return(DATA)
+  return(DATA_PI)
 }
 
 #-----------------------------------------------------------------------------------------#
 # Execution of Synthetic Control Method
 #-----------------------------------------------------------------------------------------#
 
-DATA_PM <- prepare_p_ls_PI(PRIMARY_M)
-SCM_PM <- synth(DATA_PM)
+DATA_PM_PI <- prepare_p_ls_PI(PRIMARY_M_PI)
+SCM_PM_PI <- synth(DATA_PM_PI)
 
-DATA_PP <- prepare_p_ls_PI(PRIMARY_P)
-SCM_PP <- synth(DATA_PP)
+DATA_PP_PI <- prepare_p_ls_PI(PRIMARY_P_PI)
+SCM_PP_PI <- synth(DATA_PP_PI)
 
-DATA_LSM <- prepare_p_ls_PI(LOWERS_M)
-SCM_LSM <- synth(DATA_LSM)
+DATA_LSM_PI <- prepare_p_ls_PI(LOWERS_M_PI)
+SCM_LSM_PI <- synth(DATA_LSM_PI)
 
-DATA_LSP <- prepare_p_ls_PI(LOWERS_P)
-SCM_LSP <- synth(DATA_LSP)
+DATA_LSP_PI <- prepare_p_ls_PI(LOWERS_P_PI)
+SCM_LSP_PI <- synth(DATA_LSP_PI)
 
 #-----------------------------------------------------------------------------------------#
 # Graphs Generation in ggplot (Excluding Piauí)
 #-----------------------------------------------------------------------------------------#
 
 # Generate Plots for Each Category
-PM <- plot_scm(PRIMARY_M, synth.tab(dataprep.res = DATA_PM, synth.res = SCM_PM))
-PP <- plot_scm(PRIMARY_P, synth.tab(dataprep.res = DATA_PP, synth.res = SCM_PP))
-LSM <- plot_scm(LOWERS_M, synth.tab(dataprep.res = DATA_LSM, synth.res = SCM_LSM))
-LSP <- plot_scm(LOWERS_P, synth.tab(dataprep.res = DATA_LSP, synth.res = SCM_LSP))
+PM_PI <- plot_scm(PRIMARY_M_PI, synth.tab(dataprep.res = DATA_PM_PI, synth.res = SCM_PM_PI))
+PP_PI <- plot_scm(PRIMARY_P_PI, synth.tab(dataprep.res = DATA_PP_PI, synth.res = SCM_PP_PI))
+LSM_PI <- plot_scm(LOWERS_M_PI, synth.tab(dataprep.res = DATA_LSM_PI, synth.res = SCM_LSM_PI))
+LSP_PI <- plot_scm(LOWERS_P_PI, synth.tab(dataprep.res = DATA_LSP_PI, synth.res = SCM_LSP_PI))
 
 #-----------------------------------------------------------------------------------------#
 # Combining Data for Graphs and Plot Adjustments
 #-----------------------------------------------------------------------------------------#
 
 # Combine the Synthetic Control Graph Data
-DATA_GRAPH <- rbind(PM[[1]], PP[[1]], LSM[[1]], LSP[[1]])
+DATA_GRAPH_PI <- rbind(PM_PI[[1]], PP_PI[[1]], LSM_PI[[1]], LSP_PI[[1]])
 
 # Adjust the Labels and Factors
-DATA_GRAPH$grade[DATA_GRAPH$grade=="P"] <- "Primary Education"
-DATA_GRAPH$grade[DATA_GRAPH$grade=="LS"] <- "Lower Secondary Education"
-DATA_GRAPH$grade[DATA_GRAPH$grade=="US"] <- "Upper Secondary Education"
-DATA_GRAPH$grade <- factor(DATA_GRAPH$grade, levels = c("Primary Education", 
+DATA_GRAPH_PI$grade[DATA_GRAPH_PI$grade=="P"] <- "Primary Education"
+DATA_GRAPH_PI$grade[DATA_GRAPH_PI$grade=="LS"] <- "Lower Secondary Education"
+DATA_GRAPH_PI$grade[DATA_GRAPH_PI$grade=="US"] <- "Upper Secondary Education"
+DATA_GRAPH_PI$grade <- factor(DATA_GRAPH_PI$grade, levels = c("Primary Education", 
                                                         "Lower Secondary Education"))
 
-DATA_GRAPH$subject[DATA_GRAPH$subject=="math"] <- "Mathematics"
-DATA_GRAPH$subject[DATA_GRAPH$subject=="port"] <- "Portuguese"
-DATA_GRAPH$subject <- factor(DATA_GRAPH$subject, levels = c("Mathematics", "Portuguese"))
+DATA_GRAPH_PI$subject[DATA_GRAPH_PI$subject=="math"] <- "Mathematics"
+DATA_GRAPH_PI$subject[DATA_GRAPH_PI$subject=="port"] <- "Portuguese"
+DATA_GRAPH_PI$subject <- factor(DATA_GRAPH_PI$subject, levels = c("Mathematics", "Portuguese"))
 
 #-----------------------------------------------------------------------------------------#
 # Final Plotting and Saving
 #-----------------------------------------------------------------------------------------#
 
-# Assuming DATA_GRAPH and DATA_GAP are your combined datasets
+# Assuming DATA_GRAPH_PI and DATA_GAP_PI are your combined datasets
 
 # Figure for Primary Education
-a_without_PI <- ggplot(data = filter(DATA_GRAPH, grade == "Primary Education"), aes(x = year, y = score, color = unit)) +
+a_without_PI <- ggplot(data = filter(DATA_GRAPH_PI, grade == "Primary Education"), 
+                       aes(x = year, y = score, color = unit)) +
   geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
   geom_vline(xintercept = 2011, color = "#636363", linetype = "dashed", size = 0.9) +
   geom_line(size = 0.9) +
-  scale_color_manual(values = c("#01665e", "#d8b365"), labels = c("Ceará", "Synthetic Ceará (without Piauí)"), name = "") +
+  scale_color_manual(values = c("#01665e", "#d8b365"), labels = c("Ceará", 
+                                                                  "Synthetic Ceará (without Piauí)"), name = "") +
   ylab("Score") +
   xlab("") +
   theme_bw() +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        legend.position = "bottom") +
   facet_grid(vars(grade), vars(subject))
 
 # Figure for Lower Secondary Education
-b_without_PI <- ggplot(data = filter(DATA_GRAPH, grade == "Lower Secondary Education"), aes(x = year, y = score, color = unit)) +
+b_without_PI <- ggplot(data = filter(DATA_GRAPH_PI, grade == "Lower Secondary Education"), 
+                       aes(x = year, y = score, color = unit)) +
   geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
   geom_vline(xintercept = 2015, color = "#636363", linetype = "dashed", size = 0.9) +
   geom_line(size = 0.9) +
-  scale_color_manual(values = c("#01665e", "#d8b365"), labels = c("Ceará", "Synthetic Ceará (without Piauí)"), name = "") +
+  scale_color_manual(values = c("#01665e", "#d8b365"), 
+                     labels = c("Ceará", "Synthetic Ceará (without Piauí)"), name = "") +
   ylab("Score") +
   xlab("Year") +
   theme_bw() +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        legend.position = "bottom") +
   facet_grid(vars(grade), vars(subject))
 
 # Arrange and Save the Plots
 ggarrange(a_without_PI, b_without_PI, ncol = 1, nrow = 2, common.legend = TRUE, legend = "bottom")
 ggsave(filename = "figures_without_PI.png", path = "plots", width = 21, height = 15, units = "cm")
+
+# Run Synthetic Control Method for each category (Excluding Piauí)
+SCM_PM_PI    <- synth(DATA_PM_PI)
+TABLES_PM_PI <- synth.tab(dataprep.res = DATA_PM_PI, synth.res = SCM_PM_PI)
+
+SCM_PP_PI    <- synth(DATA_PP_PI)
+TABLES_PP_PI <- synth.tab(dataprep.res = DATA_PP_PI, synth.res = SCM_PP_PI)
+
+SCM_LSM_PI   <- synth(DATA_LSM_PI)
+TABLES_LSM_PI <- synth.tab(dataprep.res = DATA_LSM_PI, synth.res = SCM_LSM_PI)
+
+SCM_LSP_PI   <- synth(DATA_LSP_PI)
+TABLES_LSP_PI <- synth.tab(dataprep.res = DATA_LSP_PI, synth.res = SCM_LSP_PI)
+
+# Extracting Weights and Renaming
+W_PM_PI <- as.data.frame(TABLES_PM_PI$tab.w) %>% 
+  filter(w.weights > 0.01) %>% 
+  rename(PM_PI = w.weights, abbreviation = unit.names) %>% 
+  dplyr::select(-unit.numbers)
+
+W_PP_PI <- as.data.frame(TABLES_PP_PI$tab.w) %>% 
+  filter(w.weights > 0.01) %>% 
+  rename(PP_PI = w.weights, abbreviation = unit.names) %>% 
+  dplyr::select(-unit.numbers)
+
+W_LSM_PI <- as.data.frame(TABLES_LSM_PI$tab.w) %>% 
+  filter(w.weights > 0.01) %>% 
+  rename(LSM_PI = w.weights, abbreviation = unit.names) %>% 
+  dplyr::select(-unit.numbers)
+
+W_LSP_PI <- as.data.frame(TABLES_LSP_PI$tab.w) %>% 
+  filter(w.weights > 0.01) %>% 
+  rename(LSP_PI = w.weights, abbreviation = unit.names) %>% 
+  dplyr::select(-unit.numbers)
+
+#-----------------------------------------------------------------------------------------#
+# Weights Table
+#-----------------------------------------------------------------------------------------#
+
+# Combining Weights into a Single Table
+TABLE_W_PI <- left_join(abbr_state, W_PM_PI, by = "abbreviation")
+TABLE_W_PI <- left_join(TABLE_W_PI, W_PP_PI, by = "abbreviation")
+TABLE_W_PI <- left_join(TABLE_W_PI, W_LSM_PI, by = "abbreviation")
+TABLE_W_PI <- left_join(TABLE_W_PI, W_LSP_PI, by = "abbreviation")
+
+# Replace NA values with 0.00
+TABLE_W_PI[is.na(TABLE_W_PI)] <- 0.00
+
+# Write the table to a CSV file
+write.csv(TABLE_W_PI, file = "table_weights_without_PI.csv")
 ```
