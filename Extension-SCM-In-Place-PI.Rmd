@@ -1,0 +1,253 @@
+---
+output: pdf_document
+latex_engine: xelatex
+header-includes:
+  - "\\usepackage{listings}"
+  - "\\lstset{breaklines=true}"
+---
+
+# Extension: In-Place Placebo for Piauí
+
+`install.packages("dplyr")`\
+`install.packages("ggplot2")`\
+`install.packages("Synth")`\
+`install.packages("xtable")`\
+`install.packages("ggpubr")`
+
+```{r setup, include=FALSE}
+#-----------------------------------------------------------------------------------------#
+# Initial Setup
+#-----------------------------------------------------------------------------------------#
+
+# Load Required Libraries
+library(dplyr)
+library(ggplot2)
+library(Synth)
+library(xtable)
+library(ggpubr)
+```
+
+```{r}
+# Load Data
+load("data/DATA_COMPLETE.RData")
+load("data/abbr_code.RData")
+
+
+# Subsetting data by grade and subject (for all states, including PI):
+PRIMARY_M <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
+PRIMARY_P <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
+LOWERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
+LOWERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
+UPPERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "math"))
+UPPERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "port"))
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_p_ls_PI()
+# Description: prepares data for the synth function - primary and lower secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_p_ls_PI <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "ln_pop", "unemployment", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 22, # Piauí Code
+                      controls.identifier   = c(11:17, 21, 24:29, 31:33, 35, 41:43, 50:53), 
+                      # Exclude PI (22) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2007, 2),
+                      time.optimize.ssr     = seq(1995, 2007, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_us_PI()
+# Description: prepares data for the synth function - upper secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_us_PI <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "unemployment", "ln_pop", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 22, # Piauí Code
+                      controls.identifier   = c(11:17, 21, 24:26, 28:29, 31:33, 35, 41:43, 50:53), 
+                      # Exclude PI (22) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2009, 2),
+                      time.optimize.ssr     = seq(1995, 2009, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Preparing data for Synth for PI
+#-----------------------------------------------------------------------------------------#
+
+# Prepare data for SCM (specifying PI as the treatment unit):
+DATA_PI_PM <- prepare_p_ls_PI(PRIMARY_M)
+DATA_PI_PP <- prepare_p_ls_PI(PRIMARY_P)
+DATA_PI_LSM <- prepare_p_ls_PI(LOWERS_M)
+DATA_PI_LSP <- prepare_p_ls_PI(LOWERS_P)
+DATA_PI_USM <- prepare_us_PI(UPPERS_M)
+DATA_PI_USP <- prepare_us_PI(UPPERS_P)
+
+# Primary School Mathematics and Portuguese
+DATA_PI_PM <- prepare_p_ls_PI(PRIMARY_M)
+DATA_PI_PP <- prepare_p_ls_PI(PRIMARY_P)
+
+# Lower Secondary School Mathematics and Portuguese
+DATA_PI_LSM <- prepare_p_ls_PI(LOWERS_M)
+DATA_PI_LSP <- prepare_p_ls_PI(LOWERS_P)
+
+# Upper Secondary School Mathematics and Portuguese
+DATA_PI_USM <- prepare_us_PI(UPPERS_M)
+DATA_PI_USP <- prepare_us_PI(UPPERS_P)
+
+#-----------------------------------------------------------------------------------------#
+# Function: plot_scm_PI()
+# Description: prepares data from the synthetic control output to be plotted with ggplot
+#-----------------------------------------------------------------------------------------#
+
+plot_scm_PI <- function(original_data, synth.tables){
+  library(tidyverse)
+  W <- as.data.frame(synth.tables[["tab.w"]])
+  str(W)
+  W <- W %>% 
+    filter(w.weights > 0.01) %>% 
+    mutate(w.weights = round(w.weights, digits = 3)) %>% 
+    rename(abbr_state = unit.names)
+  str(original_data)
+  str(W)
+  SC <- left_join(original_data, select(W, -unit.numbers), by = "abbr_state") %>% 
+    na.omit() %>% 
+    group_by(year) %>% 
+    summarise(sc = weighted.mean(score, w.weights))
+  
+  PI <- original_data %>% 
+    filter(abbr_state == "PI") %>% 
+    select(year, score)
+  
+  GAP <- left_join(PI, SC, by = "year") %>% 
+    mutate(gap = score - sc)
+  GAP$grade <- unique(original_data$grade)
+  GAP$subject <- unique(original_data$subject)
+  
+  GG_DATA <- left_join(PI, SC, by = "year") %>% 
+    pivot_longer(!year, names_to = "unit", values_to = "score")
+  
+  GG_DATA$unit[GG_DATA$unit == "score"] <- "Piauí"
+  GG_DATA$unit[GG_DATA$unit == "sc"] <- "Synthetic Control"
+  GG_DATA$grade <- unique(original_data$grade)
+  GG_DATA$subject <- unique(original_data$subject)
+  
+  return(list(GG_DATA, GAP))
+}
+
+#-----------------------------------------------------------------------------------------#
+# Data Preparation for Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Run SCM for Primary School Mathematics (PI)
+SCM_PI_PM <- synth(DATA_PI_PM)
+TABLES_PI_PM <- synth.tab(dataprep.res = DATA_PI_PM, synth.res = SCM_PI_PM)
+
+# Run SCM for Primary School Portuguese (PI)
+SCM_PI_PP <- synth(DATA_PI_PP)
+TABLES_PI_PP <- synth.tab(dataprep.res = DATA_PI_PP, synth.res = SCM_PI_PP)
+
+# Run SCM for Lower Secondary School Mathematics (PI)
+SCM_PI_LSM <- synth(DATA_PI_LSM)
+TABLES_PI_LSM <- synth.tab(dataprep.res = DATA_PI_LSM, synth.res = SCM_PI_LSM)
+
+# Run SCM for Lower Secondary School Portuguese (PI)
+SCM_PI_LSP <- synth(DATA_PI_LSP)
+TABLES_PI_LSP <- synth.tab(dataprep.res = DATA_PI_LSP, synth.res = SCM_PI_LSP)
+
+# Run SCM for Upper Secondary School Mathematics (PI)
+SCM_PI_USM <- synth(DATA_PI_USM)
+TABLES_PI_USM <- synth.tab(dataprep.res = DATA_PI_USM, synth.res = SCM_PI_USM)
+
+# Run SCM for Upper Secondary School Portuguese (PI)
+SCM_PI_USP <- synth(DATA_PI_USP)
+TABLES_PI_USP <- synth.tab(dataprep.res = DATA_PI_USP, synth.res = SCM_PI_USP)
+
+#-----------------------------------------------------------------------------------------#
+
+# Graphs in ggplot for Piauí
+PM_PI <- plot_scm_PI(PRIMARY_M, TABLES_PI_PM)
+PM_PI_SC <- PM_PI[[1]]
+PM_PI_GAP <- PM_PI[[2]]
+
+PP_PI <- plot_scm_PI(PRIMARY_P, TABLES_PI_PP)
+PP_PI_SC <- PP_PI[[1]]
+PP_PI_GAP <- PP_PI[[2]]
+
+LSM_PI <- plot_scm_PI(LOWERS_M, TABLES_PI_LSM)
+LSM_PI_SC <- LSM_PI[[1]]
+LSM_PI_GAP <- LSM_PI[[2]]
+
+LSP_PI <- plot_scm_PI(LOWERS_P, TABLES_PI_LSP)
+LSP_PI_SC <- LSP_PI[[1]]
+LSP_PI_GAP <- LSP_PI[[2]]
+
+# Combining Graph Data for Piauí
+DATA_GRAPH_PI <- rbind(PM_PI_SC, PP_PI_SC, LSM_PI_SC, LSP_PI_SC)
+
+# Adjusting Labels for Piauí data
+DATA_GRAPH_PI$grade[DATA_GRAPH_PI$grade=="P"] <- "Primary Education"
+DATA_GRAPH_PI$grade[DATA_GRAPH_PI$grade=="LS"] <- "Lower Secondary Education"
+DATA_GRAPH_PI$grade <- factor(DATA_GRAPH_PI$grade, levels = c("Primary Education", "Lower Secondary Education"))
+
+DATA_GRAPH_PI$subject[DATA_GRAPH_PI$subject=="math"] <- "Mathematics"
+DATA_GRAPH_PI$subject[DATA_GRAPH_PI$subject=="port"] <- "Portuguese"
+
+#-----------------------------------------------------------------------------------------#
+# Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Figure for Primary Education in PI
+a_06_PI <- ggplot(data = filter(DATA_GRAPH_PI, grade == "Primary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2011, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Piauí", "Synthetic Piauí"), name = "") +
+  ylab("Score") +
+  xlab("") +
+  annotate("text", x = 2007, y = 220, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2013, y = 152, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Figure for Lower Secondary Education in PI
+b_06_PI <- ggplot(data = filter(DATA_GRAPH_PI, grade == "Lower Secondary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2015, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Piauí", "Synthetic Piauí"), name = "") +
+  ylab("Score") +
+  xlab("Year") +
+  annotate("text", x = 2007, y = 250, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2017, y = 190, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Arrange and Save the Plots
+ggarrange(a_06_PI, b_06_PI, ncol = 1, nrow = 2, common.legend = TRUE, legend = "bottom")
+ggsave(filename = "figure_PI.png", path = "plots", width = 21, height = 15, units = "cm")
+```

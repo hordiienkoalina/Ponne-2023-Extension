@@ -1,0 +1,161 @@
+---
+output: pdf_document
+latex_engine: xelatex
+header-includes:
+  - "\\usepackage{listings}"
+  - "\\lstset{breaklines=true}"
+---
+
+# Replication: Synthetic Ceará (Figure 06)
+
+`install.packages("dplyr")`\
+`install.packages("ggplot2")`\
+`install.packages("Synth")`\
+`install.packages("xtable")`\
+`install.packages("ggpubr")`
+
+```{r setup, include=FALSE}
+#-----------------------------------------------------------------------------------------#
+# Initial Setup
+#-----------------------------------------------------------------------------------------#
+
+# Load Required Libraries
+library(dplyr)
+library(ggplot2)
+library(Synth)
+library(xtable)
+library(ggpubr)
+```
+
+```{r}
+source("functions/plot_scm.R")
+source("functions/prepare_p_ls.R")
+source("functions/prepare_us.R")
+source("functions/prepare_time_placebo.R")
+
+load("data/DATA_COMPLETE.RData")
+load("data/abbr_code.RData")
+```
+
+```{r}
+# Subsetting data:
+
+PRIMARY_M <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
+PRIMARY_P <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
+LOWERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
+LOWERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
+UPPERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "math"))
+UPPERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "port"))
+
+
+# Preparing data for Synth:
+DATA_PM <- prepare_p_ls(PRIMARY_M)
+DATA_PP <- prepare_p_ls(PRIMARY_P)
+
+DATA_LSM <- prepare_p_ls(LOWERS_M)
+DATA_LSP <- prepare_p_ls(LOWERS_P)
+
+DATA_USM <- prepare_us(UPPERS_M)
+DATA_USP <- prepare_us(UPPERS_P)
+
+
+##############################################
+# SCM for primary and lower secondary school #
+##############################################
+
+# Run synth
+SCM_PM    <- synth(DATA_PM)
+TABLES_PM <- synth.tab(dataprep.res = DATA_PM, synth.res = SCM_PM)
+
+SCM_PP    <- synth(DATA_PP)
+TABLES_PP <- synth.tab(dataprep.res = DATA_PP, synth.res = SCM_PP)
+
+SCM_LSM    <- synth(DATA_LSM)
+TABLES_LSM <- synth.tab(dataprep.res = DATA_LSM, synth.res = SCM_LSM)
+
+SCM_LSP    <- synth(DATA_LSP)
+TABLES_LSP <- synth.tab(dataprep.res = DATA_LSP, synth.res = SCM_LSP)
+
+
+# Graphs in ggplot
+PM <- plot_scm(PRIMARY_M, TABLES_PM)
+PM_SC <- PM[[1]]
+PM_GAP <- PM[[2]]
+
+PP <- plot_scm(PRIMARY_P, TABLES_PP)
+PP_SC <- PP[[1]]
+PP_GAP <- PP[[2]]
+
+LSM <- plot_scm(LOWERS_M, TABLES_LSM)
+LSM_SC <- LSM[[1]]
+LSM_GAP <- LSM[[2]]
+
+LSP <- plot_scm(LOWERS_P, TABLES_LSP)
+LSP_SC <- LSP[[1]]
+LSP_GAP <- LSP[[2]]
+
+DATA_GRAPH <- rbind(PM_SC, PP_SC, LSM_SC, LSP_SC)
+
+DATA_GRAPH$grade[DATA_GRAPH$grade=="P"] <- "Primary Education"
+DATA_GRAPH$grade[DATA_GRAPH$grade=="LS"] <- "Lower Secondary Education"
+DATA_GRAPH$grade <- factor(DATA_GRAPH$grade, levels = c("Primary Education", "Lower Secondary Education"))
+
+DATA_GRAPH$subject[DATA_GRAPH$subject=="math"] <- "Mathematics"
+DATA_GRAPH$subject[DATA_GRAPH$subject=="port"] <- "Portuguese"
+
+# Figure 06a (SCM - Primary Education)
+
+a_06 <- ggplot(data = filter(DATA_GRAPH, grade == "Primary Education"), aes(x=year, y= score, color = unit))+
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9)+
+  geom_vline(xintercept = 2011, color = "#636363", linetype = "dashed", size = 0.9)+
+  geom_line(size=0.9)+
+  scale_color_manual(values= c("#01665e","#d8b365"), 
+                     labels= c( "Ceará", "Synthetic Ceará"), 
+                     name = "")+
+  ylab("Score")+
+  xlab("")+
+  annotate("text", x = 2007, y = 220, label = "TI", color = "#636363", size = 4)+
+  annotate("text", x = 2013, y = 152, label = "TI + TA", color = "#636363", size = 4)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(colour = "#636363"),
+        axis.line = element_line(colour = "gray"),
+        panel.border = element_rect(colour = "gray"),
+        legend.position = "bottom",
+        panel.spacing = unit(1.1, "lines"),
+        strip.background = element_rect(fill="white", linetype = "blank"),
+        text = element_text(family="Helvetica", color ="#636363"))+
+  facet_grid(vars(grade),vars(subject))
+
+
+# Figure 06b (SCM - Lower Secondary Education)
+
+b_06 <- ggplot(data = filter(DATA_GRAPH, grade == "Lower Secondary Education"), aes(x=year, y= score, color = unit))+
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9)+
+  geom_vline(xintercept = 2015, color = "#636363", linetype = "dashed", size = 0.9)+
+  geom_line(size=0.9)+
+  scale_color_manual(values= c("#01665e","#d8b365"), 
+                     labels= c( "Ceará", "Synthetic Ceará"), 
+                     name = "")+
+  ylab("Score")+
+  xlab("Year")+
+  annotate("text", x = 2007, y = 250, label = "TI", color = "#636363", size = 4)+
+  annotate("text", x = 2017, y = 190, label = "TI + TA", color = "#636363", size = 4)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(colour = "#636363"),
+        axis.line = element_line(colour = "gray"),
+        panel.border = element_rect(colour = "gray"),
+        legend.position = "bottom",
+        panel.spacing = unit(1.1, "lines"),
+        strip.background = element_rect(fill="white", linetype = "blank"),
+        text = element_text(family="Helvetica", color ="#636363"))+
+  facet_grid(vars(grade),vars(subject))
+
+
+ggarrange(a_06, b_06, ncol = 1, nrow = 2, common.legend = TRUE, legend = "bottom")
+
+ggsave(filename = "figure06.png", path = "plots",   width = 21, height = 15, , units = "cm")
+```
