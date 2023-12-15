@@ -1,0 +1,240 @@
+# Extension: In-Place Placebo for Bahia
+
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("Synth")
+install.packages("xtable")
+install.packages("ggpubr")
+
+#-----------------------------------------------------------------------------------------#
+# Initial Setup
+#-----------------------------------------------------------------------------------------#
+
+# Load Required Libraries
+library(dplyr)
+library(ggplot2)
+library(Synth)
+library(xtable)
+library(ggpubr)
+
+# Load Data
+load("data/DATA_COMPLETE.RData")
+load("data/abbr_code.RData")
+
+# Subsetting data by grade and subject (for all states, including BA):
+PRIMARY_M <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
+PRIMARY_P <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
+LOWERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
+LOWERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
+UPPERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "math"))
+UPPERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "port"))
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_p_ls_BA()
+# Description: prepares data for the synth function - primary and lower secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_p_ls_BA <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "ln_pop", "unemployment", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 29, # Bahia Code
+                      controls.identifier   = c(11:17, 21, 22, 24:28, 31:33, 35, 41:43, 50:53), 
+                      # Exclude BA (29) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2007, 2),
+                      time.optimize.ssr     = seq(1995, 2007, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_us_BA()
+# Description: prepares data for the synth function - upper secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_us_BA <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "unemployment", "ln_pop", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 29, # Bahia Code
+                      controls.identifier   = c(11:17, 21, 22, 24:28, 31:33, 35, 41:43, 50:53), 
+                      # Exclude BA (29) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2009, 2),
+                      time.optimize.ssr     = seq(1995, 2009, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Preparing data for Synth for BA
+#-----------------------------------------------------------------------------------------#
+
+# Prepare data for SCM (specifying BA as the treatment unit):
+DATA_BA_PM <- prepare_p_ls_BA(PRIMARY_M)
+DATA_BA_PP <- prepare_p_ls_BA(PRIMARY_P)
+DATA_BA_LSM <- prepare_p_ls_BA(LOWERS_M)
+DATA_BA_LSP <- prepare_p_ls_BA(LOWERS_P)
+# DATA_BA_USM <- prepare_us_BA(UPPERS_M)
+# DATA_BA_USP <- prepare_us_BA(UPPERS_P)
+
+# Primary School Mathematics and Portuguese
+DATA_BA_PM <- prepare_p_ls_BA(PRIMARY_M)
+DATA_BA_PP <- prepare_p_ls_BA(PRIMARY_P)
+
+# Lower Secondary School Mathematics and Portuguese
+DATA_BA_LSM <- prepare_p_ls_BA(LOWERS_M)
+DATA_BA_LSP <- prepare_p_ls_BA(LOWERS_P)
+
+# Upper Secondary School Mathematics and Portuguese
+# DATA_BA_USM <- prepare_us_BA(UPPERS_M)
+# DATA_BA_USP <- prepare_us_BA(UPPERS_P)
+
+#-----------------------------------------------------------------------------------------#
+# Function: plot_scm_BA()
+# Description: prepares data from the synthetic control output to be plotted with ggplot
+#-----------------------------------------------------------------------------------------#
+
+plot_scm_BA <- function(original_data, synth.tables){
+  library(tidyverse)
+  W <- as.data.frame(synth.tables[["tab.w"]])
+  str(W)
+  W <- W %>% 
+    filter(w.weights > 0.01) %>% 
+    mutate(w.weights = round(w.weights, digits = 3)) %>% 
+    rename(abbr_state = unit.names)
+  str(original_data)
+  str(W)
+  SC <- left_join(original_data, select(W, -unit.numbers), by = "abbr_state") %>% 
+    na.omit() %>% 
+    group_by(year) %>% 
+    summarise(sc = weighted.mean(score, w.weights))
+  
+  BA <- original_data %>% 
+    filter(abbr_state == "BA") %>% 
+    select(year, score)
+  
+  GAP <- left_join(BA, SC, by = "year") %>% 
+    mutate(gap = score - sc)
+  GAP$grade <- unique(original_data$grade)
+  GAP$subject <- unique(original_data$subject)
+  
+  GG_DATA <- left_join(BA, SC, by = "year") %>% 
+    pivot_longer(!year, names_to = "unit", values_to = "score")
+  
+  GG_DATA$unit[GG_DATA$unit == "score"] <- "Bahia"
+  GG_DATA$unit[GG_DATA$unit == "sc"] <- "Synthetic Control"
+  GG_DATA$grade <- unique(original_data$grade)
+  GG_DATA$subject <- unique(original_data$subject)
+  
+  return(list(GG_DATA, GAP))
+}
+
+#-----------------------------------------------------------------------------------------#
+# Data Preparation for Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Run SCM for Primary School Mathematics (BA)
+SCM_BA_PM <- synth(DATA_BA_PM)
+TABLES_BA_PM <- synth.tab(dataprep.res = DATA_BA_PM, synth.res = SCM_BA_PM)
+
+# Run SCM for Primary School Portuguese (BA)
+SCM_BA_PP <- synth(DATA_BA_PP)
+TABLES_BA_PP <- synth.tab(dataprep.res = DATA_BA_PP, synth.res = SCM_BA_PP)
+
+# Run SCM for Lower Secondary School Mathematics (BA)
+SCM_BA_LSM <- synth(DATA_BA_LSM)
+TABLES_BA_LSM <- synth.tab(dataprep.res = DATA_BA_LSM, synth.res = SCM_BA_LSM)
+
+# Run SCM for Lower Secondary School Portuguese (BA)
+SCM_BA_LSP <- synth(DATA_BA_LSP)
+TABLES_BA_LSP <- synth.tab(dataprep.res = DATA_BA_LSP, synth.res = SCM_BA_LSP)
+
+# Run SCM for Upper Secondary School Mathematics (BA)
+# SCM_BA_USM <- synth(DATA_BA_USM)
+# TABLES_BA_USM <- synth.tab(dataprep.res = DATA_BA_USM, synth.res = SCM_BA_USM)
+
+# Run SCM for Upper Secondary School Portuguese (BA)
+# SCM_BA_USP <- synth(DATA_BA_USP)
+# TABLES_BA_USP <- synth.tab(dataprep.res = DATA_BA_USP, synth.res = SCM_BA_USP)
+
+#-----------------------------------------------------------------------------------------#
+
+# Graphs in ggplot for Bahia
+PM_BA <- plot_scm_BA(PRIMARY_M, TABLES_BA_PM)
+PM_BA_SC <- PM_BA[[1]]
+PM_BA_GAP <- PM_BA[[2]]
+
+PP_BA <- plot_scm_BA(PRIMARY_P, TABLES_BA_PP)
+PP_BA_SC <- PP_BA[[1]]
+PP_BA_GAP <- PP_BA[[2]]
+
+LSM_BA <- plot_scm_BA(LOWERS_M, TABLES_BA_LSM)
+LSM_BA_SC <- LSM_BA[[1]]
+LSM_BA_GAP <- LSM_BA[[2]]
+
+LSP_BA <- plot_scm_BA(LOWERS_P, TABLES_BA_LSP)
+LSP_BA_SC <- LSP_BA[[1]]
+LSP_BA_GAP <- LSP_BA[[2]]
+
+# Combining Graph Data for Bahia
+DATA_GRAPH_BA <- rbind(PM_BA_SC, PP_BA_SC, LSM_BA_SC, LSP_BA_SC)
+
+# Adjusting Labels for Bahia data
+DATA_GRAPH_BA$grade[DATA_GRAPH_BA$grade=="P"] <-"Primary Education"
+DATA_GRAPH_BA$grade[DATA_GRAPH_BA$grade=="LS"] <- "Lower Secondary Education"
+DATA_GRAPH_BA$grade <- factor(DATA_GRAPH_BA$grade, levels = c("Primary Education", "Lower Secondary Education"))
+
+DATA_GRAPH_BA$subject[DATA_GRAPH_BA$subject=="math"] <- "Mathematics"
+DATA_GRAPH_BA$subject[DATA_GRAPH_BA$subject=="port"] <- "Portuguese"
+
+#-----------------------------------------------------------------------------------------#
+# Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Figure for Primary Education in BA
+a_06_BA <- ggplot(data = filter(DATA_GRAPH_BA, grade == "Primary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2011, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Bahia", "Synthetic Bahia"), name = "") +
+  ylab("Score") +
+  xlab("") +
+  annotate("text", x = 2007, y = 220, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2013, y = 152, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Figure for Lower Secondary Education in BA
+b_06_BA <- ggplot(data = filter(DATA_GRAPH_BA, grade == "Lower Secondary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2015, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Bahia", "Synthetic Bahia"), name = "") +
+  ylab("Score") +
+  xlab("Year") +
+  annotate("text", x = 2007, y = 250, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2017, y = 190, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Arrange and Save the Plots
+ggarrange(a_06_BA, b_06_BA, ncol = 1, nrow = 2, common.legend = TRUE, legend = "bottom")
+ggsave(filename = "figure_BA.png", path = "plots", width = 21, height = 15, units = "cm")

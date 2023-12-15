@@ -1,0 +1,253 @@
+---
+output: pdf_document
+latex_engine: xelatex
+header-includes:
+  - "\\usepackage{listings}"
+  - "\\lstset{breaklines=true}"
+---
+
+# Extension: In-Place Placebo for Pernambuco
+
+`install.packages("dplyr")`\
+`install.packages("ggplot2")`\
+`install.packages("Synth")`\
+`install.packages("xtable")`\
+`install.packages("ggpubr")`
+
+```{r setup, include=FALSE}
+#-----------------------------------------------------------------------------------------#
+# Initial Setup
+#-----------------------------------------------------------------------------------------#
+
+# Load Required Libraries
+library(dplyr)
+library(ggplot2)
+library(Synth)
+library(xtable)
+library(ggpubr)
+```
+
+```{r}
+# Load Data
+load("data/DATA_COMPLETE.RData")
+load("data/abbr_code.RData")
+
+# Subsetting data by grade and subject (for all states, including PE):
+PRIMARY_M <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "math"))
+PRIMARY_P <- as.data.frame(filter(DATA_COMPLETE, grade == "P", subject == "port"))
+LOWERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "math"))
+LOWERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "LS", subject == "port"))
+UPPERS_M <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "math"))
+UPPERS_P <- as.data.frame(filter(DATA_COMPLETE, grade == "US", subject == "port"))
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_p_ls_PE()
+# Description: prepares data for the synth function - primary and lower secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_p_ls_PE <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "ln_pop", "unemployment", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 26, # Pernambuco Code
+                      controls.identifier   = c(11:17, 21, 22, 24:25, 27:29, 31:33, 35, 41:43, 50:53),
+                      # Exclude PE (26) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2007, 2),
+                      time.optimize.ssr     = seq(1995, 2007, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Function: prepare_us_PE()
+# Description: prepares data for the synth function - upper secondary school
+#-----------------------------------------------------------------------------------------#
+
+prepare_us_PE <- function(data){
+  library(Synth)
+  
+  predictors <- c("homicides", "TWh", "unemployment", "ln_pop", "edu_invest_pc")
+  
+  DATA_PM <- dataprep(foo = data,
+                      predictors = predictors,
+                      dependent     = "score",
+                      unit.variable = "code_state",
+                      time.variable = "year",
+                      unit.names.variable = "abbr_state",
+                      treatment.identifier  = 26, # Pernambuco Code
+                      controls.identifier   = c(11:17, 21, 22, 24:25, 27:29, 31:33, 35, 41:43, 50:53),
+                      # Exclude PE (26) and CE (23) from controls
+                      time.predictors.prior = seq(1995, 2009, 2),
+                      time.optimize.ssr     = seq(1995, 2009, 2),
+                      time.plot             = seq(1995, 2019, 2))
+  
+  return(DATA_PM)
+};
+
+#-----------------------------------------------------------------------------------------#
+# Preparing data for Synth for PE
+#-----------------------------------------------------------------------------------------#
+
+# Prepare data for SCM (specifying PE as the treatment unit):
+DATA_PE_PM <- prepare_p_ls_PE(PRIMARY_M)
+DATA_PE_PP <- prepare_p_ls_PE(PRIMARY_P)
+DATA_PE_LSM <- prepare_p_ls_PE(LOWERS_M)
+DATA_PE_LSP <- prepare_p_ls_PE(LOWERS_P)
+# DATA_PE_USM <- prepare_us_PE(UPPERS_M)
+# DATA_PE_USP <- prepare_us_PE(UPPERS_P)
+
+# Primary School Mathematics and Portuguese
+DATA_PE_PM <- prepare_p_ls_PE(PRIMARY_M)
+DATA_PE_PP <- prepare_p_ls_PE(PRIMARY_P)
+
+# Lower Secondary School Mathematics and Portuguese
+DATA_PE_LSM <- prepare_p_ls_PE(LOWERS_M)
+DATA_PE_LSP <- prepare_p_ls_PE(LOWERS_P)
+
+# Upper Secondary School Mathematics and Portuguese
+# DATA_PE_USM <- prepare_us_PE(UPPERS_M)
+# DATA_PE_USP <- prepare_us_PE(UPPERS_P)
+
+#-----------------------------------------------------------------------------------------#
+# Function: plot_scm_PE()
+# Description: prepares data from the synthetic control output to be plotted with ggplot
+#-----------------------------------------------------------------------------------------#
+
+plot_scm_PE <- function(original_data, synth.tables){
+  library(tidyverse)
+  W <- as.data.frame(synth.tables[["tab.w"]])
+  str(W)
+  W <- W %>% 
+    filter(w.weights > 0.01) %>% 
+    mutate(w.weights = round(w.weights, digits = 3)) %>% 
+    rename(abbr_state = unit.names)
+  str(original_data)
+  str(W)
+  SC <- left_join(original_data, select(W, -unit.numbers), by = "abbr_state") %>% 
+    na.omit() %>% 
+    group_by(year) %>% 
+    summarise(sc = weighted.mean(score, w.weights))
+  
+  PE <- original_data %>% 
+    filter(abbr_state == "PE") %>% 
+    select(year, score)
+  
+  GAP <- left_join(PE, SC, by = "year") %>% 
+    mutate(gap = score - sc)
+  GAP$grade <- unique(original_data$grade)
+  GAP$subject <- unique(original_data$subject)
+  
+  GG_DATA <- left_join(PE, SC, by = "year") %>% 
+    pivot_longer(!year, names_to = "unit", values_to = "score")
+  
+  GG_DATA$unit[GG_DATA$unit == "score"] <- "Pernambuco"
+  GG_DATA$unit[GG_DATA$unit == "sc"] <- "Synthetic Control"
+  GG_DATA$grade <- unique(original_data$grade)
+  GG_DATA$subject <- unique(original_data$subject)
+  
+  return(list(GG_DATA, GAP))
+}
+
+#-----------------------------------------------------------------------------------------#
+# Data Preparation for Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Run SCM for Primary School Mathematics (PE)
+SCM_PE_PM <- synth(DATA_PE_PM)
+TABLES_PE_PM <- synth.tab(dataprep.res = DATA_PE_PM, synth.res = SCM_PE_PM)
+
+# Run SCM for Primary School Portuguese (PE)
+SCM_PE_PP <- synth(DATA_PE_PP)
+TABLES_PE_PP <- synth.tab(dataprep.res = DATA_PE_PP, synth.res = SCM_PE_PP)
+
+# Run SCM for Lower Secondary School Mathematics (PE)
+SCM_PE_LSM <- synth(DATA_PE_LSM)
+TABLES_PE_LSM <- synth.tab(dataprep.res = DATA_PE_LSM, synth.res = SCM_PE_LSM)
+
+# Run SCM for Lower Secondary School Portuguese (PE)
+SCM_PE_LSP <- synth(DATA_PE_LSP)
+TABLES_PE_LSP <- synth.tab(dataprep.res = DATA_PE_LSP, synth.res = SCM_PE_LSP)
+
+# Run SCM for Upper Secondary School Mathematics (PE)
+# SCM_PE_USM <- synth(DATA_PE_USM)
+# TABLES_PE_USM <- synth.tab(dataprep.res = DATA_PE_USM, synth.res = SCM_PE_USM)
+
+# Run SCM for Upper Secondary School Portuguese (PE)
+# SCM_PE_USP <- synth(DATA_PE_USP)
+# TABLES_PE_USP <- synth.tab(dataprep.res = DATA_PE_USP, synth.res = SCM_PE_USP)
+
+#-----------------------------------------------------------------------------------------#
+
+# Graphs in ggplot for Pernambuco
+PM_PE <- plot_scm_PE(PRIMARY_M, TABLES_PE_PM)
+PM_PE_SC <- PM_PE[[1]]
+PM_PE_GAP <- PM_PE[[2]]
+
+PP_PE <- plot_scm_PE(PRIMARY_P, TABLES_PE_PP)
+PP_PE_SC <- PP_PE[[1]]
+PP_PE_GAP <- PP_PE[[2]]
+
+LSM_PE <- plot_scm_PE(LOWERS_M, TABLES_PE_LSM)
+LSM_PE_SC <- LSM_PE[[1]]
+LSM_PE_GAP <- LSM_PE[[2]]
+
+LSP_PE <- plot_scm_PE(LOWERS_P, TABLES_PE_LSP)
+LSP_PE_SC <- LSP_PE[[1]]
+LSP_PE_GAP <- LSP_PE[[2]]
+
+# Combining Graph Data for Pernambuco
+DATA_GRAPH_PE <- rbind(PM_PE_SC, PP_PE_SC, LSM_PE_SC, LSP_PE_SC)
+
+# Adjusting Labels for Pernambuco data
+DATA_GRAPH_PE$grade[DATA_GRAPH_PE$grade=="P"] <- "Primary Education"
+DATA_GRAPH_PE$grade[DATA_GRAPH_PE$grade=="LS"] <- "Lower Secondary Education"
+DATA_GRAPH_PE$grade <- factor(DATA_GRAPH_PE$grade, levels = c("Primary Education", "Lower Secondary Education"))
+
+DATA_GRAPH_PE$subject[DATA_GRAPH_PE$subject=="math"] <- "Mathematics"
+DATA_GRAPH_PE$subject[DATA_GRAPH_PE$subject=="math"] <- "Mathematics"
+DATA_GRAPH_PE$subject[DATA_GRAPH_PE$subject=="port"] <- "Portuguese"
+
+#-----------------------------------------------------------------------------------------#
+# Plotting
+#-----------------------------------------------------------------------------------------#
+
+# Figure for Primary Education in PE
+a_06_PE <- ggplot(data = filter(DATA_GRAPH_PE, grade == "Primary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2011, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Pernambuco", "Synthetic Pernambuco"), name = "") +
+  ylab("Score") +
+  xlab("") +
+  annotate("text", x = 2007, y = 220, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2013, y = 152, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Figure for Lower Secondary Education in PE
+b_06_PE <- ggplot(data = filter(DATA_GRAPH_PE, grade == "Lower Secondary Education"), aes(x = year, y = score, color = unit)) +
+  geom_vline(xintercept = 2008, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_vline(xintercept = 2015, color = "#636363", linetype = "dashed", size = 0.9) +
+  geom_line(size = 0.9) +
+  scale_color_manual(values = c("#42B1BD", "#D26B5F"), labels = c("Pernambuco", "Synthetic Pernambuco"), name = "") +
+  ylab("Score") +
+  xlab("Year") +
+  annotate("text", x = 2007, y = 250, label = "TI", color = "#636363", size = 4) +
+  annotate("text", x = 2017, y = 190, label = "TI + TA", color = "#636363", size = 4) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "bottom") +
+  facet_grid(vars(grade), vars(subject))
+
+# Arrange and Save the Plots
+ggarrange(a_06_PE, b_06_PE, ncol = 1, nrow = 2, common.legend = TRUE, legend = "bottom")
+ggsave(filename = "figure_PE.png", path = "plots", width = 21, height = 15, units = "cm")
+```
